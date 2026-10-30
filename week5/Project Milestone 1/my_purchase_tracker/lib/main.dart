@@ -1,4 +1,8 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:provider/provider.dart';
 
 void main() {
   runApp(const MyApp());
@@ -6,20 +10,17 @@ void main() {
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
+
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(home: const PurchaseList());
+    return ChangeNotifierProvider(
+      create: (context) => PurchaseProvider(),
+      child: const MaterialApp(home: PurchaseList()),
+    );
   }
 }
 
-class PurchaseList extends StatefulWidget {
-  const PurchaseList({super.key});
-
-  @override
-  State<PurchaseList> createState() => _PurchaseListState();
-}
-
-class _PurchaseListState extends State<PurchaseList> {
+class PurchaseProvider extends ChangeNotifier {
   final List<Purchase> _items = [
     const Purchase(
       description: 'Milk',
@@ -32,28 +33,69 @@ class _PurchaseListState extends State<PurchaseList> {
       imagePath: 'assets/images/bread.png',
     ),
   ];
-  Future<void> _createItem() async {
-    final item = await Navigator.of(context).push<Purchase>(
-      MaterialPageRoute(builder: (context) => const NewPurchaseScreen()),
+
+  List<Purchase> get items => List.unmodifiable(_items);
+
+  void add(Purchase item) {
+    _items.add(
+      Purchase(
+        description: item.description,
+        price: item.price,
+        imagePath: _items.length.isEven
+            ? 'assets/images/milk.png'
+            : 'assets/images/bread.png',
+      ),
     );
+    notifyListeners();
+  }
 
-    if (item == null || !mounted) return;
+  void removeAt(int index) {
+    _items.removeAt(index);
+    notifyListeners();
+  }
 
-    setState(() {
-      _items.add(
-        Purchase(
-          description: item.description,
-          price: item.price,
-          imagePath: _items.length.isEven
-              ? 'assets/images/milk.png'
-              : 'assets/images/bread.png',
-        ),
-      );
-    });
+  void move(int oldIndex, int newIndex) {
+    if (oldIndex < 0 ||
+        oldIndex >= _items.length ||
+        newIndex < 0 ||
+        newIndex >= _items.length ||
+        oldIndex == newIndex) {
+      return;
+    }
+    final item = _items.removeAt(oldIndex);
+    _items.insert(newIndex, item);
+    notifyListeners();
+  }
+}
+
+enum _PurchaseMenuAction { manageItems }
+
+class PurchaseList extends StatefulWidget {
+  const PurchaseList({super.key});
+
+  @override
+  State<PurchaseList> createState() => _PurchaseListState();
+}
+
+class _PurchaseListState extends State<PurchaseList> {
+  bool _isManagingItems = false;
+
+  void _createItem(BuildContext context) {
+    Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(builder: (context) => const NewPurchaseScreen()),
+    );
+  }
+
+  void _selectMenuAction(_PurchaseMenuAction action) {
+    switch (action) {
+      case _PurchaseMenuAction.manageItems:
+        setState(() => _isManagingItems = !_isManagingItems);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final items = context.watch<PurchaseProvider>().items;
     return Scaffold(
       appBar: AppBar(
         backgroundColor: const Color(0xFFF6F8F6),
@@ -62,6 +104,18 @@ class _PurchaseListState extends State<PurchaseList> {
         elevation: 0,
         titleSpacing: 8,
         leading: const Icon(Icons.shopping_bag_outlined),
+        actions: [
+          PopupMenuButton<_PurchaseMenuAction>(
+            tooltip: 'More options',
+            onSelected: _selectMenuAction,
+            itemBuilder: (context) => [
+              PopupMenuItem(
+                value: _PurchaseMenuAction.manageItems,
+                child: Text(_isManagingItems ? 'Done' : 'Manage items'),
+              ),
+            ],
+          ),
+        ],
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
@@ -71,7 +125,7 @@ class _PurchaseListState extends State<PurchaseList> {
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
             ),
             Text(
-              '${_items.length} items',
+              '${items.length} items',
               style: TextStyle(
                 fontSize: 12,
                 color: const Color(0xFF1D2B24).withValues(alpha: 0.65),
@@ -86,12 +140,26 @@ class _PurchaseListState extends State<PurchaseList> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(
-              child: ListView.builder(
-                itemCount: _items.length,
-                itemBuilder: (context, index) {
-                  return PurchaseItem(item: _items[index]);
-                },
-              ),
+              child: _isManagingItems
+                  ? ReorderableListView.builder(
+                      itemCount: items.length,
+                      onReorderItem: (oldIndex, newIndex) {
+                        context.read<PurchaseProvider>().move(
+                          oldIndex,
+                          newIndex,
+                        );
+                      },
+                      itemBuilder: (context, index) =>
+                          _buildPurchaseItem(items, index, isReorderable: true),
+                    )
+                  : ListView.builder(
+                      itemCount: items.length,
+                      itemBuilder: (context, index) => _buildPurchaseItem(
+                        items,
+                        index,
+                        isReorderable: false,
+                      ),
+                    ),
             ),
             const SizedBox(height: 12),
             Align(
@@ -100,7 +168,7 @@ class _PurchaseListState extends State<PurchaseList> {
                 width: 60,
                 height: 60,
                 child: ElevatedButton(
-                  onPressed: _createItem,
+                  onPressed: () => _createItem(context),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.blue,
                     foregroundColor: Colors.white,
@@ -114,6 +182,27 @@ class _PurchaseListState extends State<PurchaseList> {
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildPurchaseItem(
+    List<Purchase> items,
+    int index, {
+    required bool isReorderable,
+  }) {
+    final item = items[index];
+    return PurchaseItem(
+      key: ValueKey(item),
+      item: item,
+      onDelete: _isManagingItems
+          ? () => context.read<PurchaseProvider>().removeAt(index)
+          : null,
+      dragHandle: isReorderable
+          ? ReorderableDragStartListener(
+              index: index,
+              child: const Icon(Icons.drag_handle),
+            )
+          : null,
     );
   }
 }
@@ -131,9 +220,16 @@ class Purchase {
 }
 
 class PurchaseItem extends StatelessWidget {
-  const PurchaseItem({required this.item, super.key});
+  const PurchaseItem({
+    required this.item,
+    this.onDelete,
+    this.dragHandle,
+    super.key,
+  });
 
   final Purchase item;
+  final VoidCallback? onDelete;
+  final Widget? dragHandle;
 
   @override
   Widget build(BuildContext context) {
@@ -167,9 +263,87 @@ class PurchaseItem extends StatelessWidget {
               textAlign: TextAlign.end,
             ),
           ),
+          if (onDelete != null)
+            IconButton(
+              tooltip: 'Delete ${item.description}',
+              onPressed: onDelete,
+              icon: const Icon(Icons.delete_outline),
+            ),
+          if (dragHandle != null) ...[const SizedBox(width: 8), dragHandle!],
         ],
       ),
     );
+  }
+}
+
+class Post {
+  final String title;
+  final String body;
+
+  Post({required this.title, required this.body});
+
+  factory Post.fromJson(Map<String, dynamic> json) {
+    return Post(title: json['title'], body: json['body']);
+  }
+}
+
+class PostListScreen extends StatefulWidget {
+  const PostListScreen({super.key});
+
+  @override
+  State<PostListScreen> createState() => _PostListScreenState();
+}
+
+class _PostListScreenState extends State<PostListScreen> {
+  late Future<List<Post>> futurePosts;
+
+  @override
+  void initState() {
+    super.initState();
+    futurePosts = fetchPosts();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Popular Items')),
+      body: FutureBuilder<List<Post>>(
+        future: futurePosts,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snapshot.hasError) {
+            return const Center(child: Text('Failed to load posts'));
+          }
+          final posts = snapshot.data ?? [];
+          if (posts.isEmpty) {
+            return const Center(child: Text('No posts found'));
+          }
+          return ListView.builder(
+            itemCount: posts.length,
+            itemBuilder: (context, index) => ListTile(
+              title: Text(posts[index].title),
+              subtitle: Text(posts[index].body),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+Future<List<Post>> fetchPosts() async {
+  final response = await http.get(
+    Uri.parse('https://jsonplaceholder.typicode.com/posts'),
+  );
+
+  if (response.statusCode == 200) {
+    //return jsonDecode(response.body);
+    List<dynamic> data = jsonDecode(response.body);
+    return data.map((json) => Post.fromJson(json)).toList();
+  } else {
+    throw Exception('Failed to load posts');
   }
 }
 
@@ -195,13 +369,14 @@ class _NewPurchaseScreenState extends State<NewPurchaseScreen> {
   void _save() {
     if (!_formKey.currentState!.validate()) return;
 
-    Navigator.of(context).pop(
+    context.read<PurchaseProvider>().add(
       Purchase(
         description: _descriptionController.text.trim(),
         price: double.parse(_priceController.text.trim()),
         imagePath: 'assets/images/milk.png',
       ),
     );
+    Navigator.of(context).pop();
   }
 
   @override
@@ -260,13 +435,34 @@ class _NewPurchaseScreenState extends State<NewPurchaseScreen> {
         top: false,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(24, 12, 24, 20),
-          child: SizedBox(
-            height: 52,
-            child: FilledButton.icon(
-              onPressed: _save,
-              icon: const Icon(Icons.add),
-              label: const Text('Add item'),
-            ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () {
+                    Navigator.of(context).push<void>(
+                      MaterialPageRoute<void>(
+                        builder: (context) => const PostListScreen(),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.trending_up),
+                  label: const Text('Show most popular items this week'),
+                ),
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                height: 52,
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: _save,
+                  icon: const Icon(Icons.add),
+                  label: const Text('Add item'),
+                ),
+              ),
+            ],
           ),
         ),
       ),
