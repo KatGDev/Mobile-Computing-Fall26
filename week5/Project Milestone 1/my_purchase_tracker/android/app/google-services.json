@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "705297200453",
+    "project_id": "purchase-tracker-3283b",
+    "storage_bucket": "purchase-tracker-3283b.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:705297200453:android:e549a392f3e8727b63fa2c",
+        "android_client_info": {
+          "package_name": "com.example.my_purchase_tracker"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDadoODrgTZTS1-ftHmxQwi7uA8YQuIzEI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
